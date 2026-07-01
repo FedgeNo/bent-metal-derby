@@ -328,6 +328,7 @@
     <div id="loseVehBtns" class="chips" style="justify-content:center"></div>
   </div>
   <div class="winBtns">
+    <button class="btn ghost" id="loseHomeBtn">HOME</button>
     <button class="btn ghost" id="loseGarageBtn">GARAGE</button>
     <button class="btn" id="retryBtn">RUN IT BACK</button>
   </div>
@@ -2230,9 +2231,9 @@ function arenaClampPoint(o,margin){  // simple circular clamp for loose barrels 
    GAME STATE
    ==================================================================== */
 const DIFFICULTY={
-  easy:   { label:'EASY',   aggro:0.78, enemyDmg:0.65, extra:0 },
-  normal: { label:'NORMAL', aggro:1.00, enemyDmg:1.00, extra:0 },
-  hard:   { label:'HARD',   aggro:1.20, enemyDmg:1.35, extra:1 },
+  easy:   { label:'EASY',   aggro:0.78, enemyDmg:0.65, extra:0, speedMul:0.88 },
+  normal: { label:'NORMAL', aggro:1.00, enemyDmg:1.00, extra:0, speedMul:1.00 },
+  hard:   { label:'HARD',   aggro:1.20, enemyDmg:1.35, extra:1, speedMul:1.08 },
 };
 const UPGRADES=[
   { key:'engine', label:'Engine', desc:'Top speed & acceleration' },
@@ -2254,7 +2255,7 @@ const Game={ state:'menu', round:1, levelType:'derby', cars:[], player:null,
   score:0, levelHits:0, levelWrecks:0, levelFatalities:0, wrongTimer:0, lastBreakdown:null,
   camSign:1, camRev:false, night:false, dirtTrack:false, gripMult:1, lives:3, playerVehicle:'car',
   cash:0, upgrades:Object.fromEntries(PLAYER_TYPES.map(k=>[k,{engine:0,armor:0,ram:0,grip:0}])),
-  difficulty:'normal', diff:DIFFICULTY.normal, volume:0.5 };
+  difficulty:'normal', diff:DIFFICULTY.normal, volume:0.5, progScale:1 };
 const input={ throttle:0, steer:0, rawSteer:0, hand:false }; const keys={};
 
 /* ---------------- career / settings persistence (localStorage) ---------------- */
@@ -2359,7 +2360,10 @@ function startRound(r){
   Game.dirtTrack = (Game.levelType==='race') && Math.random()<0.45;   // some race levels are loose dirt ovals
   Game.gripMult = Game.dirtTrack ? 0.72 : 1.0;           // dirt = less grip, more sliding
   if(groundMesh){ groundMesh.material.map = Game.dirtTrack ? groundDirtTex : grassTex; groundMesh.material.needsUpdate=true; }
-  if(r===1){ Game.score=0; Game.lives=3; }               // fresh game
+  if(r===1){ Game.score=0; Game.lives=3; Game.progScale=1; }  // fresh game
+  // progressive difficulty: every 3 rounds enemies get a touch faster/harder
+  // tier 0 = rounds 1-3 (×1.0), tier 1 = rounds 4-6 (×1.07), etc.
+  Game.progScale = 1 + Math.floor((r-1)/3) * 0.07;
 
   if(Game.levelType==='derby') buildDerby();
   else if(Game.levelType==='city'){ genCity(); buildCityTrack(); }
@@ -2374,7 +2378,12 @@ function startRound(r){
     const isP=(i===0); const color=isP?0xff7b29:PALETTE[i%PALETTE.length];
     const vType = isP ? Game.playerVehicle : ENEMY_TYPES[Math.floor(Math.random()*ENEMY_TYPES.length)];   // enemies are a random mix of all classes
     const car=new Car(color,isP, isP?'YOU':NAMES[(i-1)%NAMES.length], vType);
-    car.ai.aggro *= Game.diff.aggro;                          // difficulty scales rival aggression
+    if(!isP){
+      const sp = Game.diff.speedMul * Game.progScale;
+      car.enginePow  *= sp;                                   // difficulty + progression scale enemy speed
+      car.reversePow *= sp;
+      car.ai.aggro   *= Game.diff.aggro * Game.progScale;    // and aggression
+    }
     if(Game.levelType==='derby'){ const a=i/total*TAU; car.reset(Math.cos(a)*30, Math.sin(a)*30, a+Math.PI); }
     else{ // grid behind the start line, staggered, facing the racing direction
       const row=Math.floor(i/2), col=(i%2)?1:-1;
@@ -2671,8 +2680,8 @@ function registerImpact(A,B,hit,closing){
   // Car B is hurt by A's incoming momentum × A's ram power × where B was hit
   let dB=base*fracA*A.ram*(A.dmgT>0?2:1)*zB.mul;
   // difficulty: AI smacks player harder than normal
-  if(A.isPlayer&&!B.isPlayer) dA*=Game.diff.enemyDmg;
-  if(B.isPlayer&&!A.isPlayer) dB*=Game.diff.enemyDmg;
+  if(A.isPlayer&&!B.isPlayer) dA*=Game.diff.enemyDmg * Game.progScale;
+  if(B.isPlayer&&!A.isPlayer) dB*=Game.diff.enemyDmg * Game.progScale;
   // player shield powerup absorbs incoming
   if(A.isPlayer&&A.shieldT>0) dA=0;
   if(B.isPlayer&&B.shieldT>0) dB=0;
@@ -2858,11 +2867,11 @@ function showWin(){
 function showLose(){
   const bd=Game.lastBreakdown, raceLoss=bd&&bd.raceLoss;
   const canContinue=Game.lives>0;
-  const continueLabel=canContinue?('CONTINUE · '+'♥'.repeat(Game.lives)):'RUN IT BACK';
+  $('retryBtn').style.display=canContinue?'':'none';   // hide retry when out of lives — HOME is the only restart path
   if(raceLoss){
     $('loseTitle').textContent=canContinue?'RACE LOST':'GAME OVER';
-    $('loseSub').textContent=canContinue?'Spend a life to continue':'Out of lives';
-    $('retryBtn').textContent=continueLabel;
+    $('loseSub').textContent=canContinue?'Spend a life to continue':'Out of lives — head home to run it back';
+    $('retryBtn').textContent='CONTINUE · '+'♥'.repeat(Game.lives);
     $('loseBoard').innerHTML=
       boardRow('Finish position',ordinal(bd.place),true)+
       boardRow('Hits landed',bd.hits+' × '+HIT_PTS,true)+
@@ -2870,8 +2879,8 @@ function showLose(){
       `<div class="line total"><span>Score</span><span>${Game.score.toLocaleString()}</span></div>`;
   }else{
     $('loseTitle').textContent=canContinue?'WRECKED':'GAME OVER';
-    $('loseSub').textContent=canContinue?'Spend a life to continue':'Out of lives';
-    $('retryBtn').textContent=continueLabel;
+    $('loseSub').textContent=canContinue?'Spend a life to continue':'Out of lives — head home to run it back';
+    $('retryBtn').textContent='CONTINUE · '+'♥'.repeat(Game.lives);
     $('loseBoard').innerHTML=
       boardRow('Round reached','#'+Game.round,true)+
       boardRow('Lives left',canContinue?('♥'.repeat(Game.lives)):'0',true)+
@@ -3159,6 +3168,10 @@ function closeGarage(){
 }
 $('garageCloseBtn').addEventListener('click',closeGarage);
 $('winGarageBtn').addEventListener('click',()=>openGarage('winScreen'));
+$('loseHomeBtn').addEventListener('click',()=>{
+  Game.progScale=1; Game.score=0; Game.lives=3; Game.round=1;  // full reset on giving up
+  showOverlay('startScreen'); hud(false); refreshCashTags(); buildVehicleChips(); previewHighlight();
+});
 $('loseGarageBtn').addEventListener('click',()=>openGarage('loseScreen'));
 $('startBtn').addEventListener('click',()=>{ audio.init(); audio.setVolume(Game.volume); go(1); });
 $('nextBtn').addEventListener('click',()=>{ go(Game.round+1); });
