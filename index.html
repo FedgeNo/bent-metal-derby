@@ -882,7 +882,7 @@ function buildDerby(){
   let placed=0, tries=0;
   while(placed<5 && tries<240){ tries++;
     const a=rand(0,TAU), rr=rand(10,44); const x=Math.cos(a)*rr, z=Math.sin(a)*rr;
-    if(Game.ramps.some(r=>Math.hypot(x-r.x,z-r.z)<9)) continue;
+    if(tooCloseToRamp(x,z)) continue;
     spawnBarrel(x,z); placed++; }
   const stands=placeBleachersAround(WALL_R);
   // a few trees dotted outside the arena (sparingly), never on a stand or a lamp post
@@ -1028,8 +1028,8 @@ function buildRaceTrack(){
   // burning barrels — 2 across each cluster, leaving the middle lane open to thread
   const clusters=[0.22,0.78,1.15,1.85].map(f=>f*Math.PI);
   for(const u of clusters){ const [cx,cz]=trkCenter(u); const [nx,nz]=trkNormal(u);
-    for(const off of [-6.5,6.5]) spawnBarrel(cx+nx*off, cz+nz*off); }
-  for(const u of [Math.PI*0.5+0.18, Math.PI*1.5+0.18]){ const [cx,cz]=trkCenter(u); const [nx,nz]=trkNormal(u); spawnBarrel(cx+nx*7, cz+nz*7); }
+    for(const off of [-6.5,6.5]){ const bx=cx+nx*off, bz=cz+nz*off; if(!tooCloseToRamp(bx,bz)) spawnBarrel(bx,bz); } }
+  for(const u of [Math.PI*0.5+0.18, Math.PI*1.5+0.18]){ const [cx,cz]=trkCenter(u); const [nx,nz]=trkNormal(u); const bx=cx+nx*7, bz=cz+nz*7; if(!tooCloseToRamp(bx,bz)) spawnBarrel(bx,bz); }
 
   // crowds in the stands, outside the track
   const stands=placeBleachersAround(u=>trkR(u)+TRK.halfW);
@@ -1219,7 +1219,7 @@ function buildDirtTrack(){
     for(const sg of segs){ const a=Course.pts[sg.i], b=Course.pts[(sg.i+1)%Course.pts.length];
       addRamp((a[0]+b[0])/2,(a[1]+b[1])/2, Math.atan2(b[0]-a[0],b[1]-a[1])); } }
   // a handful of burning barrels near the edges
-  for(let k=0;k<5;k++){ const a=Course.at(rand(0,1)); const off=rand(-HW+4,HW-4); spawnBarrel(a.cx+a.nx*off, a.cz+a.nz*off); }
+  for(let k=0;k<5;k++){ const a=Course.at(rand(0,1)); const off=rand(-HW+4,HW-4); const bx=a.cx+a.nx*off, bz=a.cz+a.nz*off; if(!tooCloseToRamp(bx,bz)) spawnBarrel(bx,bz); }
   // flood poles spaced around the loop
   { const spacing=72, count=Math.max(4,Math.round(total/spacing)); for(let i=0;i<count;i++){ const a=Course.at(i/count); buildFloodPole(a.cx+a.nx*(HW+6), a.cz+a.nz*(HW+6)); } }
 }
@@ -1254,6 +1254,17 @@ class Barrel{
   }
 }
 function spawnBarrel(x,z){ Game.barrels.push(new Barrel(x,z)); }
+// Returns true if (x,z) falls inside any ramp's oriented footprint + margin.
+// Ramp local axes: forward = (sin(angle), cos(angle)) along halfL, side = (cos(angle), -sin(angle)) along halfW.
+function tooCloseToRamp(x,z,margin=2.5){
+  for(const r of Game.ramps){
+    const dx=x-r.x, dz=z-r.z;
+    const fwd = dx*Math.sin(r.angle) + dz*Math.cos(r.angle);
+    const side= dx*Math.cos(r.angle) - dz*Math.sin(r.angle);
+    if(Math.abs(fwd)<r.halfL+margin && Math.abs(side)<r.halfW+margin) return true;
+  }
+  return false;
+}
 
 /* ====================================================================
    CAR
